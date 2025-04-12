@@ -13,6 +13,16 @@ DATA_FILE = "meal_plans.json"
 # NUM_WEEKS will now be loaded/set dynamically
 
 class MealPlanner(toga.App):
+    def __init__(self, formal_name=None, app_id=None, **kwargs):
+            super().__init__(formal_name="Meal Planner", app_id="com.johndavid.whatsfordinner", **kwargs)
+            self.weekly_plans = {}
+            self.current_week = 1
+            self.day_labels = {}
+            self.plan_start_date = None
+            self.num_weeks = 4
+            self.DATA_FILE = DATA_FILE
+
+
     def startup(self):
         main_box = toga.Box(style=Pack(direction=COLUMN, margin=10))  # Changed to COLUMN
 
@@ -27,6 +37,7 @@ class MealPlanner(toga.App):
         prev_button = toga.Button("< Previous Week", on_press=self.prev_week, style=Pack(flex=1))
         next_button = toga.Button("Next Week >", on_press=self.next_week, style=Pack(flex=1))
         self.week_label = toga.Label(f"Week {self.current_week}: {self.get_week_display_date()}", style=Pack(width=250, text_align=CENTER)) # Dynamic date display
+        self.prev_button = prev_button # Store a reference
         self.next_button = next_button # Store a reference
 
         week_nav_box.add(prev_button)
@@ -96,21 +107,20 @@ class MealPlanner(toga.App):
             self.stderr_label.text = ""
 
     def load_settings(self):
-        global NUM_WEEKS
-        if os.path.exists(DATA_FILE):
+        if os.path.exists(self.DATA_FILE):
             try:
-                with open(DATA_FILE, 'r') as f:
+                with open(self.DATA_FILE, 'r') as f:
                     data = json.load(f)
-                    NUM_WEEKS = data.get('num_weeks', 4) # Default to 4 if not found
+                    self.num_weeks = data.get('num_weeks', 4) # Default to 4 if not found
             except (json.JSONDecodeError, FileNotFoundError):
-                NUM_WEEKS = 4
+                self.num_weeks = 4
         else:
-            NUM_WEEKS = 4
+            self.num_weeks = 4
 
     def load_meals(self):
-        if os.path.exists(DATA_FILE):
+        if os.path.exists(self.DATA_FILE):  # Changed to self.DATA_FILE
             try:
-                with open(DATA_FILE, 'r') as f:
+                with open(self.DATA_FILE, 'r') as f:
                     data = json.load(f)
                     weekly_data_str_keys = data.get('weeks', {})
                     weekly_data = {}
@@ -119,10 +129,10 @@ class MealPlanner(toga.App):
                             week_int = int(week_str)
                             weekly_data[week_int] = meals
                         except ValueError:
-                            sys.stderr.write(f"Warning: Skipping invalid week key in data file: {week_str}")
+                            sys.stderr.write(f"Warning: Skipping invalid week key in data file: {week_str}\n")
 
                     # Ensure we have enough weeks in the data (using integer keys now)
-                    for week in range(1, NUM_WEEKS + 1):
+                    for week in range(1, self.num_weeks + 1):
                         if week not in weekly_data:
                             weekly_data[week] = self.get_default_week_meals()
 
@@ -132,11 +142,15 @@ class MealPlanner(toga.App):
                     else:
                         self.plan_start_date = self.get_default_start_date()
                     return weekly_data
-            except (json.JSONDecodeError, FileNotFoundError):
-                sys.stderr.write(f"Error loading or file not found: {DATA_FILE}. Using default.")
+            except json.JSONDecodeError:
+                sys.stderr.write(f"Error decoding JSON from {self.DATA_FILE}.  Using default meals.\n")
                 return self.get_default_weekly_meals()
+            except FileNotFoundError:
+                sys.stderr.write(f"File not found: {self.DATA_FILE}. Using default meals.\n")
+                return self.get_default_weekly_meals()  # Handle file not found explicitly
         else:
             return self.get_default_weekly_meals()
+
 
     def parse_date(self, date_str):
         try:
@@ -148,20 +162,21 @@ class MealPlanner(toga.App):
         return datetime.date.today() + datetime.timedelta(days=-datetime.date.today().weekday()) # Default to current week's Monday
 
     def load_start_date(self):
-        if os.path.exists(DATA_FILE):
+        if os.path.exists(self.DATA_FILE):
             try:
-                with open(DATA_FILE, 'r') as f:
+                with open(self.DATA_FILE, 'r') as f:
                     data = json.load(f)
-                    start_date_str = data.get('start_date')
+                    start_date_str = data.get('start_date')  # Changed from .get('weeks', {}).get('start_date')
                     if start_date_str:
                         return self.parse_date(start_date_str)
             except (json.JSONDecodeError, FileNotFoundError):
-                pass
-        return self.get_default_start_date()
+                pass  # Don't raise an error, just return the default
+            # The following line should be *outside* the if block
+            return self.get_default_start_date()
 
     def get_default_weekly_meals(self):
         default_meals = self.get_default_week_meals()
-        return {week: default_meals.copy() for week in range(1, NUM_WEEKS + 1)}
+        return {week: default_meals.copy() for week in range(1, self.num_weeks + 1)}
 
     def get_default_week_meals(self):
         return {
@@ -176,13 +191,13 @@ class MealPlanner(toga.App):
 
     def save_meals(self):
         sys.stdout.write("save_meals() called")
-        data_to_save = {'weeks': self.weekly_plans, 'start_date': self.plan_start_date.strftime('%Y-%m-%d') if self.plan_start_date else None, 'num_weeks': NUM_WEEKS}
+        data_to_save = {'weeks': self.weekly_plans, 'start_date': self.plan_start_date.strftime('%Y-%m-%d') if self.plan_start_date else None, 'num_weeks': self.num_weeks}
         try:
-            with open(DATA_FILE, 'w') as f:
+            with open(self.DATA_FILE, 'w') as f:
                 json.dump(data_to_save, f, indent=4)
         except IOError:
             sys.stderr.write(f"Error saving: {f}")
-            sys.stderr.write(f"Error saving meals to {DATA_FILE}.")
+            sys.stderr.write(f"Error saving meals to {self.DATA_FILE}.")
 
     def prev_week(self, widget):
         if self.current_week > 1:
@@ -192,14 +207,15 @@ class MealPlanner(toga.App):
             self.update_navigation_buttons()
 
     def next_week(self, widget):
-        if self.current_week < NUM_WEEKS:
+        if self.current_week < self.num_weeks:
             self.current_week += 1
             self.update_week_display()
             self.update_edit_button_callbacks()
             self.update_navigation_buttons()
 
     def update_navigation_buttons(self):
-        self.next_button.enabled = self.current_week < NUM_WEEKS
+        self.prev_button.enabled = self.current_week > 1
+        self.next_button.enabled = self.current_week < self.num_weeks
 
     def update_edit_button_callbacks(self):
         for widget in self.main_window.content.children[2:]: # Skip week nav and set weeks button
@@ -241,32 +257,49 @@ class MealPlanner(toga.App):
         self.set_weeks_window.content = content_box
         self.set_weeks_window.show()
 
+    def handle_set_weeks_ok(self, widget):
+        try:
+            num_weeks = int(self.weeks_input_widget.value)
+            if num_weeks > 0:
+                self.num_weeks = num_weeks
+                self.save_settings()
+                self.set_weeks_window.close()
+                self.set_weeks_window = None  # Clear the reference to the window
+            else:
+                sys.stderr.write("Invalid Input!Please enter a positive number.")
+        except ValueError:
+            sys.stderr.write("Invalid Input! Please enter a valid number.")
+
+    def save_settings(self):
+        settings_data = {
+            "num_weeks": self.num_weeks,
+        }
+        if self.plan_start_date:
+            settings_data["start_date"] = self.plan_start_date.strftime('%Y-%m-%d')
+        try:
+            with open(self.DATA_FILE, "w") as f:
+                json.dump(settings_data, f)
+        except Exception as e:
+            print(f"Error saving settings: {e}")  # Basic error handling
+            self.show_error_dialog("Error Saving", f"Failed to save settings: {e}")
+
     def shutdown(self):
         self.save_meals()
 
     def edit_dinner(self, widget, day, week):
         current_meal = self.weekly_plans.get(week, {}).get(day, "")
-        text_input = toga.TextInput(value=current_meal)
-        self.edit_window = toga.Window(title=f"Edit Dinner for Week {week}, {day}", resizable=True)
+        edit_window = toga.Window(title=f"Edit Dinner for Week {week}, {day}", resizable=True)
+        self.text_input = toga.TextInput(value=current_meal) # Make self.text_input an attribute
+        self.edit_window = edit_window
+        self.day = day # add self.day and self.week
+        self.week = week
 
         content = toga.Box(style=Pack(direction=COLUMN, margin=10))
         content.add(toga.Label("Enter the new dinner:", style=Pack(margin_bottom=5)))
-        content.add(text_input)
+        content.add(self.text_input)
 
-        def handle_ok(ok_button):
-            sys.stderr.write("This message should be red.\n")
-            new_meal = text_input.value
-            self.edit_window.close()
-            if new_meal is not None:
-                self.weekly_plans[week][day] = new_meal
-                self.update_week_display() # Force a re-render of the current week's labels
-                self.save_meals()
-
-        def handle_cancel(cancel_button):
-            self.edit_window.close()
-
-        ok_button = toga.Button("OK", on_press=handle_ok, style=Pack(width=60, margin=5))
-        cancel_button = toga.Button("Cancel", on_press=handle_cancel, style=Pack(width=60, margin=5))
+        ok_button = toga.Button("OK", on_press=self.handle_edit_ok, style=Pack(width=60, margin=5)) # change handle_ok to self.handle_edit_ok
+        cancel_button = toga.Button("Cancel", on_press=self.handle_edit_cancel, style=Pack(width=60, margin=5))
 
         button_box = toga.Box(style=Pack(direction=ROW, justify_content=END, margin_top=20))
         button_box.add(ok_button)
@@ -275,6 +308,19 @@ class MealPlanner(toga.App):
         content.add(button_box)
         self.edit_window.content = content
         self.edit_window.show()
+
+    def handle_edit_ok(self, ok_button): # create handle_edit_ok as a method
+        sys.stderr.write("This message should be red.\n")
+        new_meal = self.text_input.value
+        self.edit_window.close()
+        if new_meal is not None:
+            self.weekly_plans[self.week][self.day] = new_meal # change week and day to self.week and self.day
+            self.update_week_display()  # Force a re-render of the current week's labels
+            self.save_meals()
+
+    def handle_edit_cancel(self, cancel_button): # create handle_edit_cancel as a method
+        self.edit_window.close()
+
 
 def main():
     return MealPlanner()
